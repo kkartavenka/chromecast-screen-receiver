@@ -1,0 +1,24 @@
+{
+  "name": "Screen Cast Receiver",
+  "short_name": "ScreenCast",
+  "description": "Low-latency screen streaming receiver for Chromecast",
+  "version": "1.0.0",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "index.html",
+  "background_color": "#000000",
+  "theme_color": "#000000"
+}
+
