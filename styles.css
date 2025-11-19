@@ -1,0 +1,77 @@
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #000;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+}
+
+#videoPlayer {
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    background-color: #000;
+}
+
+#statusOverlay {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    right: 20px;
+    color: white;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 20px;
+    border-radius: 10px;
+    font-size: 18px;
+    display: none;
+    z-index: 1000;
+}
+
+#statusOverlay.show {
+    display: block;
+}
+
+.status-title {
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 10px;
+}
+
+.status-message {
+    margin: 5px 0;
+}
+
+.spinner {
+    border: 4px solid rgba(255, 255, 255, 0.3);
+    border-top: 4px solid white;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 20px auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+#errorOverlay {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #ff4444;
+    background: rgba(0, 0, 0, 0.9);
+    padding: 30px;
+    border-radius: 15px;
+    text-align: center;
+    display: none;
+    z-index: 2000;
+    max-width: 80%;
+}
+
+#errorOverlay.show {
+    display: block;
+}
+
