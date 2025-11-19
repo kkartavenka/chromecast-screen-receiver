@@ -1,30 +1,332 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Screen Mirroring Receiver</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%23000'/%3E%3Cpath d='M12 46h6a12 12 0 0 1 12 12v6H12zM12 34h10a20 20 0 0 1 20 20v10H12zM12 22h14a28 28 0 0 1 28 28v14H12z' fill='%23ffffff'/%3E%3Ccircle cx='18' cy='46' r='4' fill='%23ffffff'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="styles.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Mirror Receiver</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #000;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+
+        #video {
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain;
+            background-color: #000;
+        }
+
+        #status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-size: 16px;
+            z-index: 1000;
+            max-width: 300px;
+        }
+
+        #status.ready {
+            color: #4CAF50;
+        }
+
+        #status.error {
+            color: #f44336;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
 </head>
 <body>
-    <video id="videoPlayer" autoplay></video>
+    <div id="status">Initializing...</div>
+    <video id="video" autoplay playsinline></video>
 
-    <div id="statusOverlay">
-        <div class="status-title">Screen Mirroring</div>
-        <div class="spinner"></div>
-        <div id="statusMessage" class="status-message">Connecting...</div>
-    </div>
+    <!-- Cast Receiver SDK -->
+    <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+    
+    <script>
+        const statusEl = document.getElementById('status');
+        const videoEl = document.getElementById('video');
+        
+        const NAMESPACE = 'urn:x-cast:com.chromecast.screenmirror';
+        const MESSAGE_TYPE = 'SCREEN_MIRROR_SIGNAL';
+        
+        let peerConnection = null;
+        let currentSenderId = null;
+        
+        // ICE servers configuration (same as sender)
+        const iceServers = [
+            { urls: 'stun:stun.l.google.com:19302' }
+        ];
 
-    <div id="errorOverlay">
-        <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
-        <div style="font-size: 24px; font-weight: bold; margin-bottom: 10px;">Playback Error</div>
-        <div id="errorMessage" style="font-size: 18px;"></div>
-    </div>
+        function updateStatus(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            console.log(`[${timestamp}] [${type.toUpperCase()}] ${message}`);
+            statusEl.textContent = `[${timestamp}] ${message}`;
+            statusEl.className = type;
+            
+            // Auto-hide status after successful connection
+            if (type === 'ready' && message.includes('streaming')) {
+                setTimeout(() => {
+                    statusEl.classList.add('hidden');
+                }, 5000);
+            }
+        }
 
-    <!-- Google Cast SDK (explicit HTTPS so file:// loads still fetch correctly) -->
-    <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
-    <script src="app.js"></script>
+        function sendMessage(event, payload = null) {
+            if (!currentSenderId) {
+                console.error('❌ Cannot send message - No sender ID available');
+                return;
+            }
+
+            const message = {
+                type: MESSAGE_TYPE,
+                event: event,
+                payload: payload
+            };
+
+            try {
+                console.log('📤 Sending message to sender:', event, currentSenderId);
+                console.log('📤 Message payload:', JSON.stringify(message));
+                castReceiverContext.sendCustomMessage(NAMESPACE, currentSenderId, message);
+                console.log('✅ Message sent successfully');
+            } catch (error) {
+                console.error('❌ Failed to send message:', error);
+                updateStatus(`Error sending message: ${error.message}`, 'error');
+            }
+        }
+
+        function createPeerConnection(senderId) {
+            if (peerConnection) {
+                peerConnection.close();
+            }
+
+            currentSenderId = senderId;
+            updateStatus('Creating WebRTC connection...', 'info');
+
+            peerConnection = new RTCPeerConnection({ iceServers });
+
+            // Handle incoming media stream
+            peerConnection.ontrack = (event) => {
+                console.log('Received remote track:', event.track.kind);
+                if (event.streams && event.streams[0]) {
+                    videoEl.srcObject = event.streams[0];
+                    updateStatus('Connected - Streaming', 'ready');
+                }
+            };
+
+            // Handle ICE candidates
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    console.log('Sending ICE candidate');
+                    sendMessage('ice-candidate', {
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                    });
+                } else {
+                    console.log('ICE gathering complete');
+                    sendMessage('ice-complete');
+                }
+            };
+
+            // Connection state monitoring
+            peerConnection.onconnectionstatechange = () => {
+                console.log('Connection state:', peerConnection.connectionState);
+                
+                switch (peerConnection.connectionState) {
+                    case 'connected':
+                        updateStatus('WebRTC connected', 'ready');
+                        break;
+                    case 'disconnected':
+                        updateStatus('Connection lost', 'error');
+                        break;
+                    case 'failed':
+                        updateStatus('Connection failed', 'error');
+                        handleConnectionFailure();
+                        break;
+                    case 'closed':
+                        updateStatus('Connection closed', 'info');
+                        break;
+                }
+            };
+
+            peerConnection.oniceconnectionstatechange = () => {
+                console.log('ICE connection state:', peerConnection.iceConnectionState);
+            };
+
+            return peerConnection;
+        }
+
+        async function handleOffer(senderId, payload) {
+            try {
+                updateStatus('Received offer, creating answer...', 'info');
+                
+                const pc = createPeerConnection(senderId);
+                
+                // Set remote description (offer)
+                await pc.setRemoteDescription({
+                    type: payload.type,
+                    sdp: payload.sdp
+                });
+
+                // Create and set local description (answer)
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                // Send answer back to sender
+                sendMessage('webrtc-answer', {
+                    type: answer.type,
+                    sdp: answer.sdp
+                });
+
+                updateStatus('Answer sent, waiting for connection...', 'info');
+            } catch (error) {
+                console.error('Error handling offer:', error);
+                updateStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function handleIceCandidate(payload) {
+            if (!peerConnection) {
+                console.warn('Received ICE candidate but no peer connection exists');
+                return;
+            }
+
+            if (payload.candidate) {
+                try {
+                    await peerConnection.addIceCandidate({
+                        candidate: payload.candidate,
+                        sdpMid: payload.sdpMid,
+                        sdpMLineIndex: payload.sdpMLineIndex
+                    });
+                    console.log('Added remote ICE candidate');
+                } catch (error) {
+                    console.error('Error adding ICE candidate:', error);
+                }
+            }
+        }
+
+        function handleStopStream() {
+            updateStatus('Stream stopped by sender', 'info');
+            
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            if (videoEl.srcObject) {
+                videoEl.srcObject.getTracks().forEach(track => track.stop());
+                videoEl.srcObject = null;
+            }
+            
+            currentSenderId = null;
+        }
+
+        function handleConnectionFailure() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+        }
+
+        // Initialize Cast Receiver
+        const castReceiverContext = cast.framework.CastReceiverContext.getInstance();
+        
+        // Handle custom messages
+        castReceiverContext.addCustomMessageListener(NAMESPACE, (event) => {
+            console.log('📥 Received custom message from:', event.senderId);
+            console.log('📥 Message data:', JSON.stringify(event.data));
+            
+            const message = event.data;
+            
+            if (!message || !message.event) {
+                console.error('❌ Invalid message format:', message);
+                return;
+            }
+            
+            console.log('📥 Processing event:', message.event);
+            
+            switch (message.event) {
+                case 'webrtc-offer':
+                    console.log('✅ Handling WebRTC offer');
+                    handleOffer(event.senderId, message.payload);
+                    break;
+                    
+                case 'ice-candidate':
+                    console.log('✅ Handling ICE candidate');
+                    handleIceCandidate(message.payload);
+                    break;
+                    
+                case 'ice-complete':
+                    console.log('✅ Sender ICE gathering complete');
+                    break;
+                    
+                case 'stop-stream':
+                    console.log('✅ Handling stop stream');
+                    handleStopStream();
+                    break;
+                    
+                default:
+                    console.warn('⚠️ Unknown event:', message.event);
+            }
+        });
+
+        // Handle sender connection/disconnection
+        castReceiverContext.addEventListener(
+            cast.framework.system.EventType.SENDER_CONNECTED,
+            (event) => {
+                console.log('Sender connected:', event.senderId);
+                currentSenderId = event.senderId;
+                
+                // Give sender time to set up listeners before sending ready message
+                setTimeout(() => {
+                    console.log('Sending receiver-ready message...');
+                    updateStatus('Sender connected, sending ready signal...', 'ready');
+                    sendMessage('receiver-ready');
+                }, 500);
+            }
+        );
+
+        castReceiverContext.addEventListener(
+            cast.framework.system.EventType.SENDER_DISCONNECTED,
+            (event) => {
+                console.log('Sender disconnected:', event.senderId);
+                
+                if (event.senderId === currentSenderId) {
+                    handleStopStream();
+                    updateStatus('Sender disconnected', 'info');
+                }
+            }
+        );
+
+        // Start the receiver
+        const options = new cast.framework.CastReceiverOptions();
+        options.disableIdleTimeout = true;
+        
+        console.log('🚀 Starting Cast Receiver...');
+        console.log('🚀 Namespace:', NAMESPACE);
+        console.log('🚀 Message type:', MESSAGE_TYPE);
+        
+        castReceiverContext.start(options);
+        updateStatus('Ready - Waiting for sender...', 'ready');
+        
+        console.log('✅ Cast Receiver initialized and ready');
+        console.log('✅ Listening on namespace:', NAMESPACE);
+    </script>
 </body>
 </html>
 

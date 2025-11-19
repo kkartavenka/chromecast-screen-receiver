@@ -1,194 +1,193 @@
-# Custom ChromeCast Receiver
+# Custom Chromecast Receiver for Screen Mirroring
 
-This is a custom ChromeCast receiver application for screen mirroring.
+This is a simple custom Chromecast receiver application for WebRTC-based screen mirroring.
+
+## Features
+
+- ✅ WebRTC video streaming
+- ✅ Full-screen video display
+- ✅ Automatic connection handling
+- ✅ Status indicators
+- ✅ ICE candidate exchange
+- ✅ Connection state monitoring
 
 ## Setup Instructions
 
-### Step 1: Host the Receiver
+### 1. Host the Receiver
 
-You need to host `index.html` on an **HTTPS** server. Options:
+The receiver needs to be hosted on a publicly accessible HTTPS server. You have several options:
 
-#### Option A: GitHub Pages (Recommended - Free)
+#### Option A: GitHub Pages (Easiest)
 
-1. Create a new GitHub repository (e.g., `chromecast-receiver`)
+1. Create a new GitHub repository
 2. Upload `index.html` to the repository
-3. Go to Settings > Pages
-4. Enable GitHub Pages from main branch
-5. Your receiver URL will be: `https://yourusername.github.io/chromecast-receiver/index.html`
+3. Go to Settings → Pages
+4. Enable GitHub Pages from the main branch
+5. Your receiver will be available at `https://yourusername.github.io/reponame/index.html`
 
-#### Option B: Firebase Hosting (Free)
+#### Option B: Firebase Hosting
 
 ```bash
+# Install Firebase CLI
 npm install -g firebase-tools
+
+# Login to Firebase
 firebase login
+
+# Initialize Firebase in the receiver directory
+cd receiver
 firebase init hosting
-# Copy index.html to public folder
+
+# Deploy
 firebase deploy
 ```
 
-#### Option C: ngrok (For Testing - Temporary)
+#### Option C: Any HTTPS Web Server
 
-```bash
-# Install ngrok from https://ngrok.com
-cd receiver
-python3 -m http.server 8000
-# In another terminal:
-ngrok http 8000
-# Use the HTTPS URL provided by ngrok
-```
+- Upload `index.html` to any web server with HTTPS
+- Note: Chromecast **requires HTTPS** (HTTP will not work)
 
-#### Option D: Local Testing (Chrome only)
+### 2. Register Your Custom Receiver
 
-```bash
-cd receiver
-python3 -m http.server 8000
-# Open http://localhost:8000 in Chrome
-# Note: This won't work with actual ChromeCast, only for debugging
-```
-
-### Step 2: Register the Receiver with Google
-
-1. Go to [Google Cast SDK Developer Console](https://cast.google.com/publish)
+1. Go to the [Google Cast SDK Developer Console](https://cast.google.com/publish)
 2. Sign in with your Google account
 3. Click "Add New Application"
 4. Select "Custom Receiver"
-5. Fill in the form:
-   - **Name**: Screen Mirroring Receiver (or your choice)
-   - **Receiver Application URL**: Your HTTPS URL from Step 1
-   - **Guest Mode**: Optional (allows casting without WiFi)
-6. Click "Save"
-7. **Copy the Application ID** (e.g., `ABCD1234`)
+5. Enter your receiver details:
+   - **Name**: Screen Mirror Receiver (or any name)
+   - **Receiver Application URL**: Your hosted URL (must be HTTPS)
+   - **Category**: Entertainment or Utility
+6. Save and note down your **Application ID** (e.g., `A1B2C3D4`)
 
-### Step 3: Update the C# Application
+### 3. Update Your C# Application
 
-Open `ChromeCastApp/Services/WebRTCStreamingService.cs` and update the `DefaultReceiverAppId`
-constant (or set the `CHROMECAST_RECEIVER_APP_ID` environment variable) so it matches the App ID
-from Step 2.
+Update the Application ID in your code:
 
-### Step 4: Install FFmpeg libraries for the desktop sender
+**Option 1: Environment Variable (Recommended)**
+```bash
+set CHROMECAST_APP_ID=A1B2C3D4
+```
 
-The WebRTC sender uses SIPSorcery's FFmpeg bindings. Make sure the native FFmpeg libraries are installed
-and discoverable:
+**Option 2: Code (ApplicationOptions.cs)**
+```csharp
+public string ChromecastAppId { get; init; } = "A1B2C3D4"; // Your App ID
+```
 
-1. Install ffmpeg (`brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on Linux, or download the
-   Windows builds from https://www.gyan.dev/ffmpeg/builds/).
-2. If the dylibs/so files live outside a standard location, point the sender to the folder that contains
-   `libavcodec`, `libavformat`, `libavutil`, `libswscale`, and `libswresample` by setting
-   `FFMPEG_LIBRARY_PATH=/path/to/ffmpeg/lib`.
+### 4. Test Your Receiver
 
-### Step 5: Host the receiver over HTTPS (required)
-
-The CAF runtime will refuse to load required libraries when the page is opened via `file://`.
-Always host the receiver on an HTTPS origin (GitHub Pages, Firebase Hosting, ngrok, etc.) and use
-the Cast SDK Developer Console to load it on your Chromecast. The desktop browser should only be
-used for remote inspection via `chrome://inspect`, not for directly running the receiver.
-
-#### Previewing in a regular browser
-
-- If you open `index.html` directly (for example, from GitHub Pages without using the Cast
-  Developer Console’s `__castAppId__` parameter) the app now stays in **preview mode**. This avoids the repeated
-  `ws://localhost:8008` WebSocket errors emitted by the Cast SDK when no Cast transport is available.
-- To exercise the full WebRTC flow, either:
-  - Launch the receiver through the Cast Developer Console so Chrome adds the `__castAppId__` query parameter and proxies traffic via the Cast extension, or
-  - Deploy the receiver to a Cast device that was registered with your custom App ID.
-- In preview mode you will still see the UI overlay, but the CAF runtime and custom namespace stay inactive—this is expected and confirms that the page is only being used for visual inspection.
-
-### Step 4: Test
-
-1. Make sure your ChromeCast is on the same network
+1. Make sure your Chromecast is on the same network
 2. Run your C# application
-3. Select your ChromeCast device
-4. Choose "Cast your screen"
-5. The custom receiver should load on your ChromeCast
-6. Your screen should appear!
+3. The receiver should load on your Chromecast and start streaming
 
-## Receiver Features
+## Customization
 
-- **Live streaming support**: Designed specifically for continuous streams
-- **Multiple format support**: WebM, MPEG-TS, HLS
-- **Visual feedback**: Shows connection status and buffering indicators
-- **Error handling**: Displays meaningful error messages
-- **Auto-reconnect**: Handles temporary disconnections gracefully
-- **Low latency**: Optimized for real-time streaming
+### Change Video Fit Mode
 
-## Debugging
+In `index.html`, modify the `#video` style:
 
-### Check Receiver Logs
+```css
+#video {
+    object-fit: contain;  /* Options: contain, cover, fill, scale-down */
+}
+```
 
-1. Open Chrome browser
-2. Go to `chrome://inspect/#devices`
-3. Find your ChromeCast device
-4. Click "inspect"
-5. View console logs from the receiver
+### Hide Status Indicator
 
-### Common Issues
+To permanently hide the status, add:
 
-**"Receiver not found"**
-- Make sure you registered the receiver in Google Cast Console
-- Wait 15-30 minutes after registration for it to propagate
-- Verify the App ID is correct in your C# code
+```css
+#status {
+    display: none;
+}
+```
 
-**"Failed to load receiver"**
-- Ensure receiver URL is HTTPS (not HTTP)
-- Check that index.html is accessible at the URL
-- Verify CORS headers if using custom hosting
+### Change Background Color
 
-**"Video not playing"**
-- Check Chrome inspect console for video errors
-- Verify stream URL is accessible from ChromeCast's network
-- Test the stream URL in VLC to ensure it's valid
+```css
+body {
+    background-color: #1a1a1a;  /* Any color you want */
+}
+```
 
-**"Connection timeout"**
-- Ensure ChromeCast and computer are on same network
-- Check firewall isn't blocking the HTTP server port
-- Verify the local IP address is correct
+### Add a Logo
 
-## Advanced Configuration
+Add this HTML before the `<video>` tag:
 
-### Custom Styling
+```html
+<img id="logo" src="your-logo.png" alt="Logo">
+```
 
-Edit the CSS in `index.html` to customize:
-- Background color
-- Status overlay appearance
-- Video scaling/positioning
-- Error message styling
+And this CSS:
 
-### Additional Features
+```css
+#logo {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 100px;
+    height: auto;
+    z-index: 1000;
+    opacity: 0.8;
+}
+```
 
-You can extend the receiver to add:
-- Playback controls
-- Volume adjustment
-- Stream quality selection
-- Recording functionality
-- Overlays (clock, widgets, etc.)
+## Protocol Details
 
-### Performance Tuning
+The receiver implements the following message protocol:
 
-Adjust in `index.html`:
-- `autoResumeDuration`: How long to wait before resuming (seconds)
-- `maxInactivity`: Maximum idle time before closing (seconds)
-- Video element attributes: `preload`, `crossorigin`, etc.
+### Receiver → Sender
 
-## Files
+- `receiver-ready` - Sent when receiver is ready to accept offers
+- `webrtc-answer` - SDP answer in response to offer
+- `ice-candidate` - ICE candidates for NAT traversal
+- `ice-complete` - All ICE candidates have been sent
 
-- `index.html` - The custom receiver application
-- `README.md` - This file
+### Sender → Receiver
 
-## Support
+- `webrtc-offer` - SDP offer to initiate connection
+- `ice-candidate` - ICE candidates from sender
+- `ice-complete` - Sender's ICE gathering complete
+- `stop-stream` - Request to stop streaming
 
-For Google Cast SDK documentation:
-- [Cast SDK Developer Guide](https://developers.google.com/cast/docs/web_receiver)
-- [CAF Receiver API Reference](https://developers.google.com/cast/docs/reference/web_receiver)
-- [Debugging Guide](https://developers.google.com/cast/docs/debugging)
+## Troubleshooting
 
-## Security Notes
+### Receiver doesn't load
+- Verify the URL is HTTPS (not HTTP)
+- Check that the Application ID is correct
+- Try accessing the receiver URL in a browser to verify it loads
 
-- The receiver runs in a sandboxed environment on ChromeCast
-- All communication is encrypted
-- Only devices on the same network can cast
-- The receiver URL must be HTTPS in production
+### Video doesn't appear
+- Check browser console in Chrome Cast Developer Tools
+- Verify the sender is using the same namespace: `urn:x-cast:com.chromecast.screenmirror`
+- Check network connectivity between sender and receiver
 
-## License
+### Connection fails
+- Ensure STUN servers are reachable
+- Check firewall settings
+- Try adding TURN servers if behind strict NAT
 
-This receiver is provided as-is for use with your screen mirroring application.
+### How to debug
+1. Use Chrome Cast Debugger: `chrome://inspect/#devices`
+2. Find your Chromecast device
+3. Click "inspect" to open DevTools
+4. View console logs and network activity
+
+## Performance Tips
+
+1. **Reduce Frame Rate**: Lower the `SCREEN_CAPTURE_FPS` environment variable (e.g., 24 or 30)
+2. **Reduce Resolution**: Set `SCREEN_CAPTURE_REGION` to a smaller area
+3. **Network**: Use wired Ethernet for Chromecast if possible
+
+## File Size
+
+The entire receiver is a single HTML file (~8KB) with no external dependencies except the Cast SDK, making it extremely lightweight and fast to load.
+
+## Browser Compatibility
+
+The receiver runs on the Chromecast's built-in Chrome browser, which supports:
+- WebRTC
+- ES6+ JavaScript
+- Modern CSS3
+
+No transpilation or polyfills needed.
 

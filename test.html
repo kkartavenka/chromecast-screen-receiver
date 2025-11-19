@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receiver Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #4CAF50;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f8;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .checklist {
+            list-style: none;
+            padding: 0;
+        }
+        .checklist li {
+            padding: 8px 0;
+        }
+        .checklist li:before {
+            content: "✓ ";
+            color: #4CAF50;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 Chromecast Receiver Test Page</h1>
+        
+        <div class="section">
+            <h2>Quick Tests</h2>
+            <button onclick="testBasicLoad()">Test Basic Load</button>
+            <button onclick="testWebRTC()">Test WebRTC Support</button>
+            <button onclick="openReceiver()">Open Receiver Page</button>
+            <div id="testResults"></div>
+        </div>
+
+        <div class="section">
+            <h2>Pre-Deployment Checklist</h2>
+            <ul class="checklist">
+                <li>Receiver HTML file exists and is valid</li>
+                <li>HTTPS hosting is available (required for Chromecast)</li>
+                <li>WebRTC is supported in the receiver environment</li>
+                <li>Cast SDK is properly included</li>
+                <li>Custom namespace matches sender: <code>urn:x-cast:com.chromecast.screenmirror</code></li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>Deployment URLs</h2>
+            <p><strong>GitHub Pages:</strong></p>
+            <pre>https://yourusername.github.io/reponame/index.html</pre>
+            
+            <p><strong>Firebase Hosting:</strong></p>
+            <pre>firebase deploy
+# URL will be shown after deployment</pre>
+            
+            <p><strong>Custom Server:</strong></p>
+            <pre>https://your-domain.com/receiver/index.html</pre>
+        </div>
+
+        <div class="section">
+            <h2>Register Your App</h2>
+            <ol>
+                <li>Go to <a href="https://cast.google.com/publish" target="_blank">Google Cast Console</a></li>
+                <li>Click "Add New Application"</li>
+                <li>Select "Custom Receiver"</li>
+                <li>Enter your receiver URL (must be HTTPS)</li>
+                <li>Save and copy your Application ID</li>
+                <li>Set it in your C# app:
+                    <pre>set CHROMECAST_APP_ID=YourAppId</pre>
+                </li>
+            </ol>
+        </div>
+
+        <div class="section">
+            <h2>Testing After Deployment</h2>
+            <ol>
+                <li>Deploy your receiver to HTTPS hosting</li>
+                <li>Register the app in Cast Console</li>
+                <li>Wait ~15 minutes for Cast to propagate</li>
+                <li>Run your C# application with the new App ID</li>
+                <li>Use Chrome Cast Debugger to see receiver logs:
+                    <pre>chrome://inspect/#devices</pre>
+                </li>
+            </ol>
+        </div>
+
+        <div class="section">
+            <h2>Common Issues</h2>
+            <ul>
+                <li><strong>Receiver not loading:</strong> Verify HTTPS and correct URL in Cast Console</li>
+                <li><strong>WebRTC fails:</strong> Check ICE servers and network firewall</li>
+                <li><strong>No video:</strong> Verify namespace matches and check browser console</li>
+                <li><strong>Connection timeout:</strong> Ensure sender and Chromecast are on same network</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function testBasicLoad() {
+            const results = document.getElementById('testResults');
+            results.innerHTML = '<div class="status warning">Testing...</div>';
+            
+            fetch('index.html')
+                .then(response => {
+                    if (response.ok) {
+                        return response.text();
+                    }
+                    throw new Error('Failed to load index.html');
+                })
+                .then(html => {
+                    const checks = [];
+                    
+                    // Check for Cast SDK
+                    if (html.includes('cast_receiver_framework.js')) {
+                        checks.push('✓ Cast SDK included');
+                    } else {
+                        checks.push('✗ Cast SDK missing');
+                    }
+                    
+                    // Check for namespace
+                    if (html.includes('urn:x-cast:com.chromecast.screenmirror')) {
+                        checks.push('✓ Correct namespace');
+                    } else {
+                        checks.push('✗ Namespace incorrect or missing');
+                    }
+                    
+                    // Check for WebRTC
+                    if (html.includes('RTCPeerConnection')) {
+                        checks.push('✓ WebRTC code present');
+                    } else {
+                        checks.push('✗ WebRTC code missing');
+                    }
+                    
+                    // Check for video element
+                    if (html.includes('<video') || html.includes('video')) {
+                        checks.push('✓ Video element present');
+                    } else {
+                        checks.push('✗ Video element missing');
+                    }
+                    
+                    const allPassed = checks.every(c => c.startsWith('✓'));
+                    const statusClass = allPassed ? 'success' : 'error';
+                    
+                    results.innerHTML = `
+                        <div class="status ${statusClass}">
+                            <h3>Test Results:</h3>
+                            ${checks.map(c => `<div>${c}</div>`).join('')}
+                        </div>
+                    `;
+                })
+                .catch(error => {
+                    results.innerHTML = `<div class="status error">Error: ${error.message}</div>`;
+                });
+        }
+
+        function testWebRTC() {
+            const results = document.getElementById('testResults');
+            const checks = [];
+            
+            // Check RTCPeerConnection
+            if (typeof RTCPeerConnection !== 'undefined') {
+                checks.push('✓ RTCPeerConnection supported');
+            } else {
+                checks.push('✗ RTCPeerConnection not supported');
+            }
+            
+            // Check getUserMedia (not needed for receiver but good to know)
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                checks.push('✓ getUserMedia supported');
+            } else {
+                checks.push('⚠ getUserMedia not supported (not needed for receiver)');
+            }
+            
+            // Check for secure context
+            if (window.isSecureContext) {
+                checks.push('✓ Secure context (HTTPS or localhost)');
+            } else {
+                checks.push('✗ Not a secure context (HTTPS required for Chromecast)');
+            }
+            
+            const allPassed = checks.filter(c => c.startsWith('✓')).length >= 2;
+            const statusClass = allPassed ? 'success' : 'error';
+            
+            results.innerHTML = `
+                <div class="status ${statusClass}">
+                    <h3>WebRTC Support:</h3>
+                    ${checks.map(c => `<div>${c}</div>`).join('')}
+                </div>
+            `;
+        }
+
+        function openReceiver() {
+            window.open('index.html', '_blank');
+        }
+
+        // Auto-run basic tests on load
+        window.addEventListener('load', () => {
+            setTimeout(testBasicLoad, 500);
+        });
+    </script>
+</body>
+</html>
+
