@@ -1,116 +1,59 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Screen Cast Receiver</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Screen Mirroring Receiver</title>
     <style>
-        * {
+        body {
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
             background-color: #000;
             overflow: hidden;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: Arial, sans-serif;
         }
 
-        #video-container {
+        #videoPlayer {
             width: 100vw;
             height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-        }
-
-        #remote-video {
-            width: 100%;
-            height: 100%;
             object-fit: contain;
             background-color: #000;
         }
 
-        #status {
-            position: absolute;
+        #statusOverlay {
+            position: fixed;
             top: 20px;
             left: 20px;
-            color: white;
-            background-color: rgba(0, 0, 0, 0.7);
-            padding: 15px 25px;
-            border-radius: 10px;
-            font-size: 18px;
-            z-index: 10;
-            transition: opacity 0.3s;
-        }
-
-        #status.connected {
-            background-color: rgba(0, 128, 0, 0.7);
-        }
-
-        #status.error {
-            background-color: rgba(255, 0, 0, 0.7);
-        }
-
-        .status-dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background-color: #ff9800;
-            margin-right: 10px;
-            animation: pulse 1.5s ease-in-out infinite;
-        }
-
-        #status.connected .status-dot {
-            background-color: #4caf50;
-        }
-
-        #status.error .status-dot {
-            background-color: #f44336;
-        }
-
-        @keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.3;
-            }
-        }
-
-        #debug-info {
-            position: absolute;
-            bottom: 20px;
             right: 20px;
             color: white;
-            background-color: rgba(0, 0, 0, 0.7);
-            padding: 10px 15px;
-            border-radius: 5px;
-            font-size: 12px;
-            font-family: monospace;
-            max-width: 300px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            font-size: 18px;
             display: none;
+            z-index: 1000;
         }
 
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
+        #statusOverlay.show {
+            display: block;
+        }
+
+        .status-title {
             font-size: 24px;
-            text-align: center;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .status-message {
+            margin: 5px 0;
         }
 
         .spinner {
             border: 4px solid rgba(255, 255, 255, 0.3);
             border-top: 4px solid white;
             border-radius: 50%;
-            width: 50px;
-            height: 50px;
+            width: 40px;
+            height: 40px;
             animation: spin 1s linear infinite;
             margin: 20px auto;
         }
@@ -119,23 +62,240 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        #errorOverlay {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff4444;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            display: none;
+            z-index: 2000;
+            max-width: 80%;
+        }
+
+        #errorOverlay.show {
+            display: block;
+        }
     </style>
 </head>
 <body>
-    <div id="video-container">
-        <video id="remote-video" autoplay playsinline></video>
-        <div id="status">
-            <span class="status-dot"></span>
-            <span id="status-text">Waiting for connection...</span>
-        </div>
-        <div id="loading">
-            <div class="spinner"></div>
-            <div>Initializing receiver...</div>
-        </div>
-        <div id="debug-info"></div>
+    <video id="videoPlayer" autoplay></video>
+
+    <div id="statusOverlay">
+        <div class="status-title">Screen Mirroring</div>
+        <div class="spinner"></div>
+        <div id="statusMessage" class="status-message">Connecting...</div>
     </div>
 
-    <script src="receiver.js"></script>
+    <div id="errorOverlay">
+        <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+        <div style="font-size: 24px; font-weight: bold; margin-bottom: 10px;">Playback Error</div>
+        <div id="errorMessage" style="font-size: 18px;"></div>
+    </div>
+
+    <!-- Google Cast SDK -->
+    <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+
+    <script>
+        const SIGNAL_NAMESPACE = 'urn:x-cast:com.chromecast.screenmirror';
+        const MESSAGE_TYPE = 'SCREEN_MIRROR_SIGNAL';
+        const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+        const context = cast.framework.CastReceiverContext.getInstance();
+        const playerManager = context.getPlayerManager();
+        const videoElement = document.getElementById('videoPlayer');
+        const statusOverlay = document.getElementById('statusOverlay');
+        const statusMessage = document.getElementById('statusMessage');
+        const errorOverlay = document.getElementById('errorOverlay');
+        const errorMessage = document.getElementById('errorMessage');
+
+        videoElement.autoplay = true;
+        videoElement.playsInline = true;
+        videoElement.muted = true;
+
+        let hideStatusTimeout = null;
+        let peerConnection = null;
+        let activeSenderId = null;
+
+        function showStatus(message) {
+            console.log('[Status]', message);
+            statusMessage.textContent = message;
+            statusOverlay.classList.add('show');
+
+            if (hideStatusTimeout) {
+                clearTimeout(hideStatusTimeout);
+            }
+            hideStatusTimeout = setTimeout(() => statusOverlay.classList.remove('show'), 3000);
+        }
+
+        function showError(message) {
+            console.error('[Error]', message);
+            errorMessage.textContent = message;
+            errorOverlay.classList.add('show');
+            statusOverlay.classList.remove('show');
+        }
+
+        function hideError() {
+            errorOverlay.classList.remove('show');
+        }
+
+        function sendSignal(event, payload) {
+            if (!activeSenderId) {
+                return;
+            }
+
+            context.sendCustomMessage(SIGNAL_NAMESPACE, activeSenderId, {
+                type: MESSAGE_TYPE,
+                event,
+                payload
+            });
+        }
+
+        function teardown(reason) {
+            if (peerConnection) {
+                peerConnection.ontrack = null;
+                peerConnection.onicecandidate = null;
+                peerConnection.onconnectionstatechange = null;
+                peerConnection.close();
+                peerConnection = null;
+            }
+
+            if (videoElement.srcObject) {
+                videoElement.srcObject.getTracks().forEach(track => track.stop());
+                videoElement.srcObject = null;
+            }
+
+            if (reason) {
+                showStatus(reason);
+            }
+        }
+
+        function createPeerConnection() {
+            if (peerConnection) {
+                return peerConnection;
+            }
+
+            peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+            peerConnection.ontrack = (event) => {
+                console.log('[WebRTC] Remote track added.');
+                hideError();
+                showStatus('Streaming...');
+                if (!videoElement.srcObject) {
+                    videoElement.srcObject = event.streams[0];
+                }
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    sendSignal('ice-candidate', event.candidate);
+                } else {
+                    sendSignal('ice-complete');
+                }
+            };
+
+            peerConnection.onconnectionstatechange = () => {
+                console.log('[WebRTC] Connection state', peerConnection.connectionState);
+                switch (peerConnection.connectionState) {
+                    case 'connected':
+                        showStatus('Screen mirroring active');
+                        break;
+                    case 'failed':
+                    case 'disconnected':
+                        showError('Connection lost');
+                        teardown('Waiting for offer...');
+                        break;
+                }
+            };
+
+            return peerConnection;
+        }
+
+        async function handleOffer(payload) {
+            try {
+                const pc = createPeerConnection();
+                await pc.setRemoteDescription(new RTCSessionDescription(payload));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                sendSignal('webrtc-answer', { type: answer.type, sdp: answer.sdp });
+                showStatus('Negotiating WebRTC...');
+            } catch (err) {
+                console.error('[WebRTC] Failed to handle offer', err);
+                showError('Failed to process offer: ' + err.message);
+            }
+        }
+
+        async function handleRemoteCandidate(payload) {
+            try {
+                if (!peerConnection) {
+                    createPeerConnection();
+                }
+                await peerConnection.addIceCandidate(payload);
+            } catch (err) {
+                console.warn('[WebRTC] Failed to add ICE candidate', err);
+            }
+        }
+
+        context.addCustomMessageListener(SIGNAL_NAMESPACE, async (event) => {
+            activeSenderId = event.senderId;
+            const data = event.data || {};
+            if (data.type !== MESSAGE_TYPE) {
+                return;
+            }
+
+            switch (data.event) {
+                case 'webrtc-offer':
+                    showStatus('Offer received, creating answer...');
+                    await handleOffer(data.payload);
+                    break;
+                case 'ice-candidate':
+                    await handleRemoteCandidate(data.payload);
+                    break;
+                case 'ice-complete':
+                    console.log('[WebRTC] ICE gathering completed by sender');
+                    break;
+                case 'stop-stream':
+                    teardown('Sender stopped streaming');
+                    break;
+            }
+        });
+
+        context.addEventListener(cast.framework.system.EventType.SENDER_CONNECTED, (event) => {
+            activeSenderId = event.senderId;
+            console.log('[System] Sender connected', activeSenderId);
+            sendSignal('receiver-ready');
+            showStatus('Sender connected. Waiting for offer...');
+        });
+
+        context.addEventListener(cast.framework.system.EventType.SENDER_DISCONNECTED, () => {
+            console.log('[System] Sender disconnected');
+            activeSenderId = null;
+            teardown('Sender disconnected');
+            sendSignal('receiver-ready');
+        });
+
+        const options = new cast.framework.CastReceiverOptions();
+        options.disableIdleTimeout = true;
+        options.maxInactivity = 3600;
+        options.customNamespaces = {
+            [SIGNAL_NAMESPACE]: cast.framework.system.MessageType.JSON
+        };
+
+        playerManager.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, request => {
+            // Prevent default media playback attempts.
+            showStatus('Use the desktop sender to start WebRTC streaming.');
+            return null;
+        });
+
+        context.start(options);
+        console.log('[Receiver] Started CAF context');
+        showStatus('Waiting for sender...');
+    </script>
 </body>
 </html>
 
