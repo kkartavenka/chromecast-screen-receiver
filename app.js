@@ -41,16 +41,63 @@ function hideError() {
     errorOverlay.classList.remove('show');
 }
 
-function sendSignal(event, payload) {
-    if (!activeSenderId || !castContext) {
+function getConnectedSenderIds() {
+    if (!castContext || typeof castContext.getSenders !== 'function') {
+        return [];
+    }
+
+    try {
+        const senders = castContext.getSenders() || [];
+        return senders
+            .map(sender => sender.id)
+            .filter(Boolean);
+    } catch (err) {
+        console.warn('[System] Failed to enumerate connected senders.', err);
+        return [];
+    }
+}
+
+function sendSignal(event, payload, explicitSenderId) {
+    if (!castContext) {
         return;
     }
 
-    castContext.sendCustomMessage(SIGNAL_NAMESPACE, activeSenderId, {
-        type: MESSAGE_TYPE,
-        event,
-        payload
+    const targets = [];
+
+    if (explicitSenderId) {
+        targets.push(explicitSenderId);
+    } else if (activeSenderId) {
+        targets.push(activeSenderId);
+    } else {
+        targets.push(...getConnectedSenderIds());
+    }
+
+    if (!targets.length) {
+        console.debug('[Signal] No connected senders to deliver event', event);
+        return;
+    }
+
+    targets.forEach(senderId => {
+        castContext.sendCustomMessage(SIGNAL_NAMESPACE, senderId, {
+            type: MESSAGE_TYPE,
+            event,
+            payload
+        });
     });
+}
+
+function notifySenderReady(targetSenderId) {
+    const targets = targetSenderId ? [targetSenderId] : getConnectedSenderIds();
+    if (!targets.length) {
+        return;
+    }
+
+    targets.forEach(senderId => {
+        activeSenderId = senderId;
+        sendSignal('receiver-ready', undefined, senderId);
+    });
+
+    showStatus('Sender connected. Waiting for offer...');
 }
 
 function teardown(reason) {
@@ -168,17 +215,15 @@ function registerCastListeners() {
     });
 
     castContext.addEventListener(cast.framework.system.EventType.SENDER_CONNECTED, (event) => {
-        activeSenderId = event.senderId;
-        console.log('[System] Sender connected', activeSenderId);
-        sendSignal('receiver-ready');
-        showStatus('Sender connected. Waiting for offer...');
+        console.log('[System] Sender connected', event.senderId);
+        notifySenderReady(event.senderId);
     });
 
     castContext.addEventListener(cast.framework.system.EventType.SENDER_DISCONNECTED, () => {
         console.log('[System] Sender disconnected');
         activeSenderId = null;
         teardown('Sender disconnected');
-        sendSignal('receiver-ready');
+        notifySenderReady();
     });
 }
 
@@ -205,6 +250,7 @@ function startReceiver() {
 
     castContext.start(options);
     registerCastListeners();
+    notifySenderReady();
     console.log('[Receiver] Started CAF context');
     showStatus('Waiting for sender...');
 }
