@@ -98,16 +98,14 @@
         <div id="errorMessage" style="font-size: 18px;"></div>
     </div>
 
-    <!-- Google Cast SDK -->
-    <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+    <!-- Google Cast SDK (explicit HTTPS so file:// loads still fetch correctly) -->
+    <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 
     <script>
         const SIGNAL_NAMESPACE = 'urn:x-cast:com.chromecast.screenmirror';
         const MESSAGE_TYPE = 'SCREEN_MIRROR_SIGNAL';
         const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
-        const context = cast.framework.CastReceiverContext.getInstance();
-        const playerManager = context.getPlayerManager();
         const videoElement = document.getElementById('videoPlayer');
         const statusOverlay = document.getElementById('statusOverlay');
         const statusMessage = document.getElementById('statusMessage');
@@ -121,6 +119,9 @@
         let hideStatusTimeout = null;
         let peerConnection = null;
         let activeSenderId = null;
+        let castContext = null;
+        let castPlayerManager = null;
+        const runningFromFile = window.location.protocol === 'file:';
 
         function showStatus(message) {
             console.log('[Status]', message);
@@ -145,11 +146,11 @@
         }
 
         function sendSignal(event, payload) {
-            if (!activeSenderId) {
+            if (!activeSenderId || !castContext) {
                 return;
             }
 
-            context.sendCustomMessage(SIGNAL_NAMESPACE, activeSenderId, {
+            castContext.sendCustomMessage(SIGNAL_NAMESPACE, activeSenderId, {
                 type: MESSAGE_TYPE,
                 event,
                 payload
@@ -241,60 +242,92 @@
             }
         }
 
-        context.addCustomMessageListener(SIGNAL_NAMESPACE, async (event) => {
-            activeSenderId = event.senderId;
-            const data = event.data || {};
-            if (data.type !== MESSAGE_TYPE) {
+        function registerCastListeners() {
+            if (!castContext) {
                 return;
             }
 
-            switch (data.event) {
-                case 'webrtc-offer':
-                    showStatus('Offer received, creating answer...');
-                    await handleOffer(data.payload);
-                    break;
-                case 'ice-candidate':
-                    await handleRemoteCandidate(data.payload);
-                    break;
-                case 'ice-complete':
-                    console.log('[WebRTC] ICE gathering completed by sender');
-                    break;
-                case 'stop-stream':
-                    teardown('Sender stopped streaming');
-                    break;
+            castContext.addCustomMessageListener(SIGNAL_NAMESPACE, async (event) => {
+                activeSenderId = event.senderId;
+                const data = event.data || {};
+                if (data.type !== MESSAGE_TYPE) {
+                    return;
+                }
+
+                switch (data.event) {
+                    case 'webrtc-offer':
+                        showStatus('Offer received, creating answer...');
+                        await handleOffer(data.payload);
+                        break;
+                    case 'ice-candidate':
+                        await handleRemoteCandidate(data.payload);
+                        break;
+                    case 'ice-complete':
+                        console.log('[WebRTC] ICE gathering completed by sender');
+                        break;
+                    case 'stop-stream':
+                        teardown('Sender stopped streaming');
+                        break;
+                }
+            });
+
+            castContext.addEventListener(cast.framework.system.EventType.SENDER_CONNECTED, (event) => {
+                activeSenderId = event.senderId;
+                console.log('[System] Sender connected', activeSenderId);
+                sendSignal('receiver-ready');
+                showStatus('Sender connected. Waiting for offer...');
+            });
+
+            castContext.addEventListener(cast.framework.system.EventType.SENDER_DISCONNECTED, () => {
+                console.log('[System] Sender disconnected');
+                activeSenderId = null;
+                teardown('Sender disconnected');
+                sendSignal('receiver-ready');
+            });
+        }
+
+        function startReceiver()
+        {
+            if (!window.cast || !cast.framework) {
+                console.error('[Receiver] Cast framework is not available yet.');
+                return;
             }
-        });
 
-        context.addEventListener(cast.framework.system.EventType.SENDER_CONNECTED, (event) => {
-            activeSenderId = event.senderId;
-            console.log('[System] Sender connected', activeSenderId);
-            sendSignal('receiver-ready');
-            showStatus('Sender connected. Waiting for offer...');
-        });
+            castContext = cast.framework.CastReceiverContext.getInstance();
+            castPlayerManager = castContext.getPlayerManager();
 
-        context.addEventListener(cast.framework.system.EventType.SENDER_DISCONNECTED, () => {
-            console.log('[System] Sender disconnected');
-            activeSenderId = null;
-            teardown('Sender disconnected');
-            sendSignal('receiver-ready');
-        });
+            const options = new cast.framework.CastReceiverOptions();
+            options.disableIdleTimeout = true;
+            options.maxInactivity = 3600;
+            options.customNamespaces = {
+                [SIGNAL_NAMESPACE]: cast.framework.system.MessageType.JSON
+            };
 
-        const options = new cast.framework.CastReceiverOptions();
-        options.disableIdleTimeout = true;
-        options.maxInactivity = 3600;
-        options.customNamespaces = {
-            [SIGNAL_NAMESPACE]: cast.framework.system.MessageType.JSON
-        };
+            castPlayerManager.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, request => {
+                // Prevent default media playback attempts.
+                showStatus('Use the desktop sender to start WebRTC streaming.');
+                return null;
+            });
 
-        playerManager.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, request => {
-            // Prevent default media playback attempts.
-            showStatus('Use the desktop sender to start WebRTC streaming.');
-            return null;
-        });
+            castContext.start(options);
+            registerCastListeners();
+            console.log('[Receiver] Started CAF context');
+            showStatus('Waiting for sender...');
+        }
 
-        context.start(options);
-        console.log('[Receiver] Started CAF context');
-        showStatus('Waiting for sender...');
+        if (runningFromFile) {
+            showError('Receiver must be hosted via HTTPS or loaded on a Cast device.');
+        } else if (window.cast && cast.framework) {
+            startReceiver();
+        } else {
+            window.__onGCastApiAvailable = function(isAvailable) {
+                if (isAvailable) {
+                    startReceiver();
+                } else {
+                    showError('Cast API failed to load.');
+                }
+            };
+        }
     </script>
 </body>
 </html>

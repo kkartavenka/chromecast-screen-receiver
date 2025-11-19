@@ -65,6 +65,24 @@ Open `ChromeCastApp/Services/WebRTCStreamingService.cs` and update the `DefaultR
 constant (or set the `CHROMECAST_RECEIVER_APP_ID` environment variable) so it matches the App ID
 from Step 2.
 
+### Step 4: Install FFmpeg libraries for the desktop sender
+
+The WebRTC sender uses SIPSorcery's FFmpeg bindings. Make sure the native FFmpeg libraries are installed
+and discoverable:
+
+1. Install ffmpeg (`brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on Linux, or download the
+   Windows builds from https://www.gyan.dev/ffmpeg/builds/).
+2. If the dylibs/so files live outside a standard location, point the sender to the folder that contains
+   `libavcodec`, `libavformat`, `libavutil`, `libswscale`, and `libswresample` by setting
+   `FFMPEG_LIBRARY_PATH=/path/to/ffmpeg/lib`.
+
+### Step 5: Host the receiver over HTTPS (required)
+
+The CAF runtime will refuse to load required libraries when the page is opened via `file://`.
+Always host the receiver on an HTTPS origin (GitHub Pages, Firebase Hosting, ngrok, etc.) and use
+the Cast SDK Developer Console to load it on your Chromecast. The desktop browser should only be
+used for remote inspection via `chrome://inspect`, not for directly running the receiver.
+
 ### Step 4: Test
 
 1. Make sure your ChromeCast is on the same network
