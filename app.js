@@ -18,6 +18,10 @@ let activeSenderId = null;
 let castContext = null;
 let castPlayerManager = null;
 const runningFromFile = window.location.protocol === 'file:';
+const urlParams = new URLSearchParams(window.location.search);
+const hasCastLaunchParams = urlParams.has('__castAppId__');
+const isCastDeviceRuntime = /CrKey|GoogleCastReceiver/i.test(navigator.userAgent);
+const isPreviewOnly = !isCastDeviceRuntime && !hasCastLaunchParams;
 
 function showStatus(message) {
     console.log('[Status]', message);
@@ -89,6 +93,9 @@ function sendSignal(event, payload, explicitSenderId) {
 function notifySenderReady(targetSenderId) {
     const targets = targetSenderId ? [targetSenderId] : getConnectedSenderIds();
     if (!targets.length) {
+        if (isPreviewOnly) {
+            showStatus('Preview mode: no Cast senders connected.');
+        }
         return;
     }
 
@@ -225,11 +232,25 @@ function registerCastListeners() {
         teardown('Sender disconnected');
         notifySenderReady();
     });
+
+    castContext.addEventListener(cast.framework.system.EventType.ERROR, (event) => {
+        console.error('[System] CAF runtime error', event);
+        if (!isCastDeviceRuntime) {
+            showError('Cast Developer Console could not reach a receiver. Install the Cast extension or test on Cast hardware.');
+        } else {
+            showError('Receiver runtime reported an error. Check Cast logs.');
+        }
+    });
 }
 
 function startReceiver() {
     if (!window.cast || !cast.framework) {
         console.error('[Receiver] Cast framework is not available yet.');
+        return;
+    }
+
+    if (isPreviewOnly) {
+        showStatus('Browser preview mode detected. Deploy to a Cast device or launch via Cast Developer Console (__castAppId__) to enable WebRTC.');
         return;
     }
 
@@ -257,13 +278,15 @@ function startReceiver() {
 
 if (runningFromFile) {
     showError('Receiver must be hosted via HTTPS or loaded on a Cast device.');
+} else if (isPreviewOnly) {
+    showStatus('Receiver UI preview. No Cast runtime detected, so CAF will not start.');
 } else if (window.cast && cast.framework) {
     startReceiver();
 } else {
     window.__onGCastApiAvailable = function(isAvailable) {
-        if (isAvailable) {
+        if (isAvailable && !isPreviewOnly) {
             startReceiver();
-        } else {
+        } else if (!isAvailable) {
             showError('Cast API failed to load.');
         }
     };

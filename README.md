@@ -83,6 +83,16 @@ Always host the receiver on an HTTPS origin (GitHub Pages, Firebase Hosting, ngr
 the Cast SDK Developer Console to load it on your Chromecast. The desktop browser should only be
 used for remote inspection via `chrome://inspect`, not for directly running the receiver.
 
+#### Previewing in a regular browser
+
+- If you open `index.html` directly (for example, from GitHub Pages without using the Cast
+  Developer Console’s `__castAppId__` parameter) the app now stays in **preview mode**. This avoids the repeated
+  `ws://localhost:8008` WebSocket errors emitted by the Cast SDK when no Cast transport is available.
+- To exercise the full WebRTC flow, either:
+  - Launch the receiver through the Cast Developer Console so Chrome adds the `__castAppId__` query parameter and proxies traffic via the Cast extension, or
+  - Deploy the receiver to a Cast device that was registered with your custom App ID.
+- In preview mode you will still see the UI overlay, but the CAF runtime and custom namespace stay inactive—this is expected and confirms that the page is only being used for visual inspection.
+
 ### Step 4: Test
 
 1. Make sure your ChromeCast is on the same network
