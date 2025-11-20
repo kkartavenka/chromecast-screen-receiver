@@ -1,162 +1,166 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="utf-8">
     <title>Screen Mirror Receiver</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; font-family: Arial, sans-serif; }
+        #video { 
+            width: 100vw; 
+            height: 100vh; 
+            object-fit: contain; 
+            display: block;
         }
-
-        body {
-            background-color: #000;
-            overflow: hidden;
-            font-family: Arial, sans-serif;
-        }
-
-        #video {
-            width: 100vw;
-            height: 100vh;
-            object-fit: contain;
-            background-color: #000;
-        }
-
-        #status {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #fff;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px 20px;
+        #status { 
+            position: absolute; 
+            top: 20px; 
+            left: 20px; 
+            color: #fff; 
+            background: rgba(0,0,0,0.7); 
+            padding: 15px 25px; 
             border-radius: 8px;
-            font-size: 16px;
+            font-size: 18px;
             z-index: 1000;
-            max-width: 300px;
+            transition: opacity 0.3s;
         }
-
-        #status.ready {
-            color: #4CAF50;
-        }
-
-        #status.error {
-            color: #f44336;
-        }
-
-        .hidden {
-            display: none;
-        }
+        #status.error { background: rgba(220,53,69,0.9); }
+        #status.ready { background: rgba(40,167,69,0.9); }
+        #status.info { background: rgba(0,123,255,0.9); }
     </style>
 </head>
 <body>
-    <div id="status">Initializing...</div>
     <video id="video" autoplay playsinline></video>
+    <div id="status">Initializing...</div>
 
-    <!-- Cast Receiver SDK -->
     <script src="//www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
-    
     <script>
         const statusEl = document.getElementById('status');
         const videoEl = document.getElementById('video');
         
-        const NAMESPACE = 'urn:x-cast:com.google.cast.screenmirror';
-        const MESSAGE_TYPE = 'SCREEN_MIRROR_SIGNAL';
-        
         let peerConnection = null;
-        let currentSenderId = null;
-        
-        // ICE servers configuration (same as sender)
+        let senderIp = null;
+        let signalingPort = 8888;
+        let pollingInterval = null;
+
         const iceServers = [
-            { urls: 'stun:stun.l.google.com:19302' }
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
         ];
 
         function updateStatus(message, type = 'info') {
-            const timestamp = new Date().toLocaleTimeString();
-            console.log(`[${timestamp}] [${type.toUpperCase()}] ${message}`);
-            statusEl.textContent = `[${timestamp}] ${message}`;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+            statusEl.textContent = message;
             statusEl.className = type;
             
             // Auto-hide status after successful connection
-            if (type === 'ready' && message.includes('streaming')) {
+            if (type === 'ready') {
                 setTimeout(() => {
-                    statusEl.classList.add('hidden');
-                }, 5000);
+                    statusEl.style.opacity = '0';
+                }, 3000);
+            } else {
+                statusEl.style.opacity = '1';
             }
         }
 
-        function sendMessage(event, payload = null) {
-            if (!currentSenderId) {
-                console.error('❌ Cannot send message - No sender ID available');
-                return;
-            }
-
-            const message = {
-                type: MESSAGE_TYPE,
-                event: event,
-                payload: payload
-            };
-
+        async function httpGet(path) {
+            const url = `http://${senderIp}:${signalingPort}${path}`;
+            console.log(`📥 HTTP GET ${url}`);
+            
             try {
-                console.log('📤 Sending message to sender:', event, currentSenderId);
-                console.log('📤 Message payload:', JSON.stringify(message));
-                castReceiverContext.sendCustomMessage(NAMESPACE, currentSenderId, message);
-                console.log('✅ Message sent successfully');
+                const response = await fetch(url);
+                if (!response.ok) {
+                    console.warn(`HTTP ${response.status}: ${path}`);
+                    return null;
+                }
+                return await response.json();
             } catch (error) {
-                console.error('❌ Failed to send message:', error);
-                updateStatus(`Error sending message: ${error.message}`, 'error');
+                console.error(`HTTP GET error for ${path}:`, error);
+                return null;
             }
         }
 
-        function createPeerConnection(senderId) {
-            if (peerConnection) {
-                peerConnection.close();
+        async function httpPost(path, data) {
+            const url = `http://${senderIp}:${signalingPort}${path}`;
+            console.log(`📤 HTTP POST ${url}`, data);
+            
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+                
+                if (!response.ok) {
+                    console.error(`HTTP ${response.status}: ${path}`);
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                console.error(`HTTP POST error for ${path}:`, error);
+                return false;
             }
+        }
 
-            currentSenderId = senderId;
+        async function pollForIceCandidates() {
+            if (!peerConnection) return;
+            
+            const data = await httpGet('/ice-candidate');
+            if (data && data.candidates && data.candidates.length > 0) {
+                console.log(`📥 Received ${data.candidates.length} ICE candidate(s) from sender`);
+                
+                for (const candidateJson of data.candidates) {
+                    try {
+                        const candidate = JSON.parse(candidateJson);
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                        console.log('✅ Added sender ICE candidate');
+                    } catch (error) {
+                        console.error('❌ Failed to add ICE candidate:', error);
+                    }
+                }
+            }
+        }
+
+        async function startWebRTC() {
             updateStatus('Creating WebRTC connection...', 'info');
 
+            // Create peer connection
             peerConnection = new RTCPeerConnection({ iceServers });
 
             // Handle incoming media stream
             peerConnection.ontrack = (event) => {
-                console.log('Received remote track:', event.track.kind);
+                console.log('📺 Received remote track:', event.track.kind);
                 if (event.streams && event.streams[0]) {
                     videoEl.srcObject = event.streams[0];
-                    updateStatus('Connected - Streaming', 'ready');
+                    updateStatus('Connected - Streaming!', 'ready');
                 }
             };
 
             // Handle ICE candidates
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
-                    console.log('Sending ICE candidate');
-                    sendMessage('ice-candidate', {
-                        candidate: event.candidate.candidate,
-                        sdpMid: event.candidate.sdpMid,
-                        sdpMLineIndex: event.candidate.sdpMLineIndex
-                    });
+                    console.log('📤 Sending ICE candidate to sender');
+                    const candidateJson = JSON.stringify(event.candidate.toJSON());
+                    httpPost('/ice-candidate', { candidate: candidateJson });
                 } else {
-                    console.log('ICE gathering complete');
-                    sendMessage('ice-complete');
+                    console.log('✅ ICE gathering complete');
                 }
             };
 
-            // Connection state monitoring
+            // Handle connection state
             peerConnection.onconnectionstatechange = () => {
-                console.log('Connection state:', peerConnection.connectionState);
+                console.log('🔗 Connection state:', peerConnection.connectionState);
                 
                 switch (peerConnection.connectionState) {
                     case 'connected':
-                        updateStatus('WebRTC connected', 'ready');
+                        updateStatus('Connected - Streaming!', 'ready');
                         break;
                     case 'disconnected':
-                        updateStatus('Connection lost', 'error');
+                        updateStatus('Disconnected', 'info');
                         break;
                     case 'failed':
                         updateStatus('Connection failed', 'error');
-                        handleConnectionFailure();
+                        setTimeout(attemptReconnect, 2000);
                         break;
                     case 'closed':
                         updateStatus('Connection closed', 'info');
@@ -164,152 +168,205 @@
                 }
             };
 
-            peerConnection.oniceconnectionstatechange = () => {
-                console.log('ICE connection state:', peerConnection.iceConnectionState);
-            };
-
-            return peerConnection;
-        }
-
-        async function handleOffer(senderId, payload) {
-            try {
-                updateStatus('Received offer, creating answer...', 'info');
-                
-                const pc = createPeerConnection(senderId);
-                
-                // Set remote description (offer)
-                await pc.setRemoteDescription({
-                    type: payload.type,
-                    sdp: payload.sdp
-                });
-
-                // Create and set local description (answer)
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-
-                // Send answer back to sender
-                sendMessage('webrtc-answer', {
-                    type: answer.type,
-                    sdp: answer.sdp
-                });
-
-                updateStatus('Answer sent, waiting for connection...', 'info');
-            } catch (error) {
-                console.error('Error handling offer:', error);
-                updateStatus(`Error: ${error.message}`, 'error');
+            // Fetch SDP offer from sender
+            updateStatus('Fetching offer from sender...', 'info');
+            console.log('📥 Fetching SDP offer from sender...');
+            
+            let offer = null;
+            let attempts = 0;
+            while (!offer && attempts < 10) {
+                offer = await httpGet('/offer');
+                if (!offer) {
+                    console.log(`Waiting for offer... (attempt ${attempts + 1}/10)`);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    attempts++;
+                }
             }
-        }
 
-        async function handleIceCandidate(payload) {
-            if (!peerConnection) {
-                console.warn('Received ICE candidate but no peer connection exists');
+            if (!offer || !offer.sdp) {
+                updateStatus('Failed to get offer from sender', 'error');
+                console.error('❌ No offer received from sender');
                 return;
             }
 
-            if (payload.candidate) {
-                try {
-                    await peerConnection.addIceCandidate({
-                        candidate: payload.candidate,
-                        sdpMid: payload.sdpMid,
-                        sdpMLineIndex: payload.sdpMLineIndex
-                    });
-                    console.log('Added remote ICE candidate');
-                } catch (error) {
-                    console.error('Error adding ICE candidate:', error);
+            console.log('✅ Received SDP offer from sender');
+
+            // Set remote description (offer)
+            await peerConnection.setRemoteDescription({
+                type: 'offer',
+                sdp: offer.sdp
+            });
+            console.log('✅ Set remote description');
+
+            // Create and set local description (answer)
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            console.log('✅ Created SDP answer');
+
+            // Send answer to sender
+            updateStatus('Sending answer to sender...', 'info');
+            const success = await httpPost('/answer', {
+                type: 'answer',
+                sdp: answer.sdp
+            });
+
+            if (success) {
+                console.log('✅ Sent SDP answer to sender');
+                updateStatus('Waiting for connection...', 'info');
+                
+                // Start polling for ICE candidates
+                pollingInterval = setInterval(pollForIceCandidates, 500);
+            } else {
+                updateStatus('Failed to send answer', 'error');
+                console.error('❌ Failed to send answer to sender');
+            }
+        }
+
+        function attemptReconnect() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+            updateStatus('Reconnecting...', 'info');
+            setTimeout(startWebRTC, 1000);
+        }
+
+        async function autoDiscoverSender() {
+            updateStatus('Auto-discovering sender IP...', 'info');
+            console.log('🔍 Starting IP auto-discovery...');
+            
+            // Get our own IP to determine the subnet
+            // Try common private network ranges
+            const baseIPs = [];
+            
+            // Try 192.168.x.x range (most common)
+            for (let i = 0; i <= 255; i++) {
+                baseIPs.push(`192.168.1.${i}`);
+                baseIPs.push(`192.168.0.${i}`);
+            }
+            
+            // Try 10.x.x.x range
+            for (let i = 0; i <= 255; i++) {
+                baseIPs.push(`10.0.0.${i}`);
+            }
+            
+            // Try 172.20.x.x range (common for mobile hotspots)
+            for (let i = 0; i <= 255; i++) {
+                baseIPs.push(`172.20.10.${i}`);
+            }
+            
+            console.log(`🔍 Testing ${baseIPs.length} possible sender IPs...`);
+            
+            // Test IPs in parallel (but limit concurrency)
+            const batchSize = 20;
+            for (let i = 0; i < baseIPs.length; i += batchSize) {
+                const batch = baseIPs.slice(i, i + batchSize);
+                const results = await Promise.allSettled(
+                    batch.map(async (ip) => {
+                        try {
+                            const controller = new AbortController();
+                            const timeout = setTimeout(() => controller.abort(), 200);
+                            
+                            const response = await fetch(`http://${ip}:8888/health`, {
+                                signal: controller.signal
+                            });
+                            
+                            clearTimeout(timeout);
+                            
+                            if (response.ok) {
+                                return ip;
+                            }
+                        } catch {
+                            // Ignore errors
+                        }
+                        return null;
+                    })
+                );
+                
+                const found = results.find(r => r.status === 'fulfilled' && r.value);
+                if (found && found.value) {
+                    senderIp = found.value;
+                    console.log(`✅ Found sender at ${senderIp}!`);
+                    updateStatus(`Found sender at ${senderIp}`, 'ready');
+                    setTimeout(startWebRTC, 500);
+                    return;
                 }
             }
+            
+            updateStatus('Could not find sender IP', 'error');
+            console.error('❌ Failed to auto-discover sender IP');
         }
 
         function handleStopStream() {
-            updateStatus('Stream stopped by sender', 'info');
-            
             if (peerConnection) {
                 peerConnection.close();
                 peerConnection = null;
             }
-            
-            if (videoEl.srcObject) {
-                videoEl.srcObject.getTracks().forEach(track => track.stop());
-                videoEl.srcObject = null;
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
             }
-            
-            currentSenderId = null;
-        }
-
-        function handleConnectionFailure() {
-            if (peerConnection) {
-                peerConnection.close();
-                peerConnection = null;
-            }
+            videoEl.srcObject = null;
+            updateStatus('Stream stopped', 'info');
         }
 
         // Initialize Cast Receiver
         const castReceiverContext = cast.framework.CastReceiverContext.getInstance();
         
-        // Handle custom messages
-        castReceiverContext.addCustomMessageListener(NAMESPACE, (event) => {
-            console.log('📥 Received custom message from:', event.senderId);
-            console.log('📥 Message data:', JSON.stringify(event.data));
-            
-            const message = event.data;
-            
-            if (!message || !message.event) {
-                console.error('❌ Invalid message format:', message);
-                return;
+        // Get sender IP from launch data
+        castReceiverContext.addEventListener(
+            cast.framework.system.EventType.READY,
+            (event) => {
+                console.log('📡 Cast receiver ready');
+                
+                // Try to get sender IP from launch data
+                const launchData = castReceiverContext.getApplicationData();
+                console.log('Launch data:', launchData);
+                
+                if (launchData) {
+                    try {
+                        const data = typeof launchData === 'string' ? JSON.parse(launchData) : launchData;
+                        senderIp = data.senderIp;
+                        signalingPort = data.port || 8888;
+                        console.log(`✅ Got sender IP: ${senderIp}:${signalingPort}`);
+                    } catch (error) {
+                        console.error('Failed to parse launch data:', error);
+                    }
+                }
+                
+                if (!senderIp) {
+                    // Fallback: try common local IP ranges
+                    console.warn('⚠️ No sender IP in launch data, will try to auto-discover');
+                    // Try to discover sender by attempting health checks on common IPs
+                    setTimeout(autoDiscoverSender, 500);
+                }
             }
-            
-            console.log('📥 Processing event:', message.event);
-            
-            switch (message.event) {
-                case 'webrtc-offer':
-                    console.log('✅ Handling WebRTC offer');
-                    handleOffer(event.senderId, message.payload);
-                    break;
-                    
-                case 'ice-candidate':
-                    console.log('✅ Handling ICE candidate');
-                    handleIceCandidate(message.payload);
-                    break;
-                    
-                case 'ice-complete':
-                    console.log('✅ Sender ICE gathering complete');
-                    break;
-                    
-                case 'stop-stream':
-                    console.log('✅ Handling stop stream');
-                    handleStopStream();
-                    break;
-                    
-                default:
-                    console.warn('⚠️ Unknown event:', message.event);
-            }
-        });
+        );
 
-        // Handle sender connection/disconnection
         castReceiverContext.addEventListener(
             cast.framework.system.EventType.SENDER_CONNECTED,
             (event) => {
-                console.log('Sender connected:', event.senderId);
-                currentSenderId = event.senderId;
+                console.log('👤 Sender connected:', event.senderId);
                 
-                // Give sender time to set up listeners before sending ready message
-                setTimeout(() => {
-                    console.log('Sending receiver-ready message...');
-                    updateStatus('Sender connected, sending ready signal...', 'ready');
-                    sendMessage('receiver-ready');
-                }, 500);
+                if (senderIp) {
+                    updateStatus(`Connecting to ${senderIp}...`, 'info');
+                    // Wait a moment for sender to be ready
+                    setTimeout(startWebRTC, 1000);
+                } else {
+                    updateStatus('Waiting for sender IP...', 'info');
+                }
             }
         );
 
         castReceiverContext.addEventListener(
             cast.framework.system.EventType.SENDER_DISCONNECTED,
             (event) => {
-                console.log('Sender disconnected:', event.senderId);
-                
-                if (event.senderId === currentSenderId) {
-                    handleStopStream();
-                    updateStatus('Sender disconnected', 'info');
-                }
+                console.log('👤 Sender disconnected:', event.senderId);
+                handleStopStream();
             }
         );
 
@@ -318,15 +375,10 @@
         options.disableIdleTimeout = true;
         
         console.log('🚀 Starting Cast Receiver...');
-        console.log('🚀 Namespace:', NAMESPACE);
-        console.log('🚀 Message type:', MESSAGE_TYPE);
-        
         castReceiverContext.start(options);
         updateStatus('Ready - Waiting for sender...', 'ready');
         
-        console.log('✅ Cast Receiver initialized and ready');
-        console.log('✅ Listening on namespace:', NAMESPACE);
+        console.log('✅ Cast Receiver initialized');
     </script>
 </body>
 </html>
-
