@@ -247,29 +247,39 @@
             for (let i = 0; i <= 255; i++) {
                 baseIPs.push(`192.168.1.${i}`);
                 baseIPs.push(`192.168.0.${i}`);
+                baseIPs.push(`192.168.2.${i}`);
             }
             
-            // Try 10.x.x.x range
-            for (let i = 0; i <= 255; i++) {
-                baseIPs.push(`10.0.0.${i}`);
+            // Try 10.x.x.x range - expanded to cover more subnets
+            for (let j = 0; j <= 255; j++) {
+                for (let k of [0, 1, 10, 20, 50, 58, 91, 100]) { // Common third octets
+                    baseIPs.push(`10.${j}.${k}.1`);
+                    baseIPs.push(`10.${j}.${k}.2`);
+                    baseIPs.push(`10.${j}.${k}.10`);
+                    baseIPs.push(`10.${j}.${k}.42`); // Common host numbers
+                    baseIPs.push(`10.${j}.${k}.100`);
+                }
             }
             
-            // Try 172.20.x.x range (common for mobile hotspots)
-            for (let i = 0; i <= 255; i++) {
-                baseIPs.push(`172.20.10.${i}`);
+            // Try 172.16-31.x.x range (private range)
+            for (let j = 16; j <= 31; j++) {
+                for (let k = 0; k <= 10; k++) {
+                    baseIPs.push(`172.${j}.${k}.1`);
+                    baseIPs.push(`172.${j}.${k}.10`);
+                }
             }
             
             console.log(`🔍 Testing ${baseIPs.length} possible sender IPs...`);
             
             // Test IPs in parallel (but limit concurrency)
-            const batchSize = 20;
+            const batchSize = 50;
             for (let i = 0; i < baseIPs.length; i += batchSize) {
                 const batch = baseIPs.slice(i, i + batchSize);
                 const results = await Promise.allSettled(
                     batch.map(async (ip) => {
                         try {
                             const controller = new AbortController();
-                            const timeout = setTimeout(() => controller.abort(), 200);
+                            const timeout = setTimeout(() => controller.abort(), 150);
                             
                             const response = await fetch(`http://${ip}:8888/health`, {
                                 signal: controller.signal
@@ -292,13 +302,13 @@
                     senderIp = found.value;
                     console.log(`✅ Found sender at ${senderIp}!`);
                     updateStatus(`Found sender at ${senderIp}`, 'ready');
-                    setTimeout(startWebRTC, 500);
-                    return;
+                    return true;
                 }
             }
             
             updateStatus('Could not find sender IP', 'error');
             console.error('❌ Failed to auto-discover sender IP');
+            return false;
         }
 
         function handleStopStream() {
@@ -342,22 +352,33 @@
                     // Fallback: try common local IP ranges
                     console.warn('⚠️ No sender IP in launch data, will try to auto-discover');
                     // Try to discover sender by attempting health checks on common IPs
-                    setTimeout(autoDiscoverSender, 500);
+                    setTimeout(async () => {
+                        const found = await autoDiscoverSender();
+                        if (found && senderIp) {
+                            // If we found it before sender connects, wait for sender
+                            updateStatus('Waiting for sender to connect...', 'info');
+                        }
+                    }, 500);
                 }
             }
         );
 
         castReceiverContext.addEventListener(
             cast.framework.system.EventType.SENDER_CONNECTED,
-            (event) => {
+            async (event) => {
                 console.log('👤 Sender connected:', event.senderId);
+                
+                if (!senderIp) {
+                    updateStatus('Auto-discovering sender...', 'info');
+                    await autoDiscoverSender();
+                }
                 
                 if (senderIp) {
                     updateStatus(`Connecting to ${senderIp}...`, 'info');
                     // Wait a moment for sender to be ready
                     setTimeout(startWebRTC, 1000);
                 } else {
-                    updateStatus('Waiting for sender IP...', 'info');
+                    updateStatus('Could not find sender', 'error');
                 }
             }
         );
